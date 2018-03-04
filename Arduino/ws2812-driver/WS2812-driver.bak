@@ -1,0 +1,431 @@
+/**
+ * Pluggable LED module for Chorus RF Laptimer by Andrey Voroshkov (bshep)
+ * fast port I/O code from http://masteringarduino.blogspot.com.by/2013/10/fastest-and-smallest-digitalread-and.html
+
+The MIT License (MIT)
+
+Copyright (c) 2017 by Andrey Voroshkov (bshep)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
+
+#include <FastLED.h>
+#include <PinChangeInterrupt.h>
+
+#define INTERRUPT_PIN 12
+#define INTERRUPT_BTN1 3
+#define INTERRUPT_BTN2 2
+#define LED_DATA_PIN 6
+
+#define COLOR_ORDER GRB
+#define CHIPSET     WS2811
+
+#define NUM_LEDS    144
+#define MIN_FIRE_LEDS 70
+
+#define NUM_COLORS  6
+#define NUM_COUNDOWN_COLORS 4
+
+CRGB leds[NUM_LEDS];
+
+CHSV countdownCHSVColors[NUM_COUNDOWN_COLORS] = {
+    CHSV(96, 255, 255),
+    CHSV(64, 255, 255),
+    CHSV(32, 255, 255),
+    CHSV(0, 255, 255)
+};
+
+CHSV CHSVcolors[NUM_COLORS] = {
+    CHSV(0, 255, 255), // red
+    CHSV(96, 255, 255), // green
+    CHSV(160, 255, 255), // blue
+    CHSV(64, 255, 255),  // yellow
+    CHSV(224, 255, 255),  // pink
+    CHSV(0, 0, 255)  // white
+};
+
+volatile uint8_t newEvent = 0;
+
+/* possibleCommands:
+0 - drone 0 pass
+1 - drone 1 pass
+2 - drone 2 pass
+3 - drone 3 pass
+10 - start race (start beep)
+11 - start -1 beep
+12 - start -2 beep
+13 - start -3 beep
+14 - prepare to race (race button pressed in app)
+15 - stop race
+*/
+volatile uint8_t command = 15;
+
+uint32_t ledSequenceCounter = 0;
+uint32_t effectStartTime;
+uint32_t frameStartTime;
+uint32_t effectDuration = 3000;
+uint8_t currentEffect = 1;
+uint8_t effectBrightness = 255;
+uint8_t effectColorIndex = 0;
+CHSV effectHSVColor;
+uint8_t fireNumLeds = MIN_FIRE_LEDS;
+
+// Array of fire temperature readings at each simulation cell
+byte heat[NUM_LEDS];
+
+DEFINE_GRADIENT_PALETTE( heatmap_gp ) {
+      0,     0,  0,  0,   //black
+    100,   255,  0,  0,   //red
+    190,   255,255,  0,   //bright yellow
+    255,   255,255,255    //white
+};
+
+DEFINE_GRADIENT_PALETTE( redFire_gp ) {
+      0,     0,  0,  0,   //black
+    100,   255,  0,  0,   //red
+    190,   255,90,  0,
+    255,   255,255,255    //white
+};
+
+DEFINE_GRADIENT_PALETTE( blueFire_gp ) {
+      0,     0,  0,  0,   //black
+     30,   0, 10, 10,
+    120,   0,  0,  250,   //blue
+    199,   0, 200, 255,
+    255,   255,255,255    //white
+};
+
+DEFINE_GRADIENT_PALETTE( greenFire_gp ) {
+      0,     0,  0,  0,   //black
+     30,   10, 20, 0,
+    100,   0,  240,  0,   //green
+    190,   200,255,  0,   //yellow
+    255,   255,255,255    //white
+};
+
+DEFINE_GRADIENT_PALETTE( yellowFire_gp ) {
+      0,     0,  0,  0,   //black
+     30,   50, 20, 0,     //darker orange
+    130,   255, 255, 0,   //yellow
+    255,   255,255,255    //white
+};
+
+// CRGBPalette16 firePalette = HeatColors_p;
+
+CRGBPalette16 firePalettesList [5] = { redFire_gp, blueFire_gp, greenFire_gp, yellowFire_gp, HeatColors_p};
+// ----------------------------------------------------------------------------
+void setup() {
+    DDRB = 0; //all 8-13 are inputs
+    PORTB = 0xFF; //all 8-13 pull-up, values will be inverted
+
+    pinMode(INTERRUPT_PIN, INPUT_PULLUP);
+    pinMode(INTERRUPT_BTN1, INPUT_PULLUP);
+    pinMode(INTERRUPT_BTN2, INPUT_PULLUP);
+
+    FastLED.addLeds<NEOPIXEL, LED_DATA_PIN>(leds, NUM_LEDS);
+
+    delay(100); //just don't use LEDs immediately anyway
+
+    FastLED.show(); // Initialize all pixels to 'off'
+
+    random16_add_entropy( random());
+
+    attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(INTERRUPT_PIN), intHandler, CHANGE);
+    attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(INTERRUPT_BTN1), btnHandler1, FALLING);
+    attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(INTERRUPT_BTN2), btnHandler2, FALLING);
+}
+
+// ----------------------------------------------------------------------------
+void loop() {
+    if (newEvent) {
+        newEvent = 0;
+        if (command >= 0 && command <= 3) { // drone passed
+            currentEffect = 3; // rise fire
+            effectDuration = 150;
+            effectColorIndex = command;
+        } else if (command >= 10 && command <= 13) { // start sequence
+            currentEffect = 0;
+            effectDuration = 2000;
+            effectBrightness = 200;
+            effectHSVColor = countdownCHSVColors[command - 10];
+        } else if (command == 14) { // race finished, switch to default effect
+            currentEffect = 1; // fire
+            effectColorIndex = 5; //real fire heatmap
+        }
+        else if (command == 15) { // prepare to race
+            currentEffect = 2;
+        }
+
+        runCurrentEffect(1);
+    } else {
+        runCurrentEffect(0);
+    }
+    FastLED.show();
+}
+
+// ----------------------------------------------------------------------------
+void intHandler(void) {
+    newEvent = 1;
+    // portb data is inverted
+    command = (~PINB) & 0xF;
+}
+
+void btnHandler1(void) {
+    // static uint8_t counter;
+    // counter = ++counter % 4;
+    // newEvent = counter >> 1;
+
+    // // todo remove the above and uncomment below when intHandler uses not button
+    // // newEvent = 1;
+
+    // // portb data is inverted
+    // command = (~PINB) & 0xF;
+    effectColorIndex = ++effectColorIndex % 4;
+}
+
+void btnHandler2(void) {
+    // static uint8_t counter;
+    // counter = ++counter % 4;
+    // uint8_t newEffect = counter >> 1; // because button changes twice upon press
+    // if (currentEffect != newEffect) {
+    //     newEvent = 1;
+    // }
+    currentEffect = 3;
+    newEvent = 1;
+    effectDuration = 150;
+
+    // currentEffect = ++currentEffect % 2; // number of effects
+    // newEvent = 1;
+}
+
+void runCurrentEffect(uint8_t isStart) {
+    switch(currentEffect) {
+        case 0:
+            effectInstantFlashAndDissolve(isStart);
+            break;
+        case 1:
+            fireEffect(isStart);
+            break;
+        case 2:
+            setBlack(isStart);
+            break;
+        case 3:
+            riseFire(isStart);
+            break;
+        case 4:
+            keepTopFireLevel(isStart);
+            break;
+        case 5:
+            tameFire(isStart);
+            break;
+    }
+}
+
+uint8_t checkIsNewFrame(uint8_t frameDelay) {
+    uint32_t time = millis();
+
+    uint32_t frameDiff = time - frameStartTime;
+    if (frameDiff < frameDelay) {
+        return false;
+    }
+
+    frameStartTime = time;
+    return true;
+}
+
+void effectInstantFlashAndDissolve(uint8_t isStart) {
+    #define FRAMES_PER_SECOND 30
+    #define FRAME_DELAY 1000/FRAMES_PER_SECOND
+
+    if (isStart) {
+        effectStartTime = millis();
+        frameStartTime = effectStartTime;
+        for(uint8_t i = 0; i < NUM_LEDS; i++) {
+            CHSV color = effectHSVColor;
+            color.v = effectBrightness;
+            leds[i] = color;
+        }
+    } else {
+        if (!checkIsNewFrame(FRAME_DELAY)) return;
+
+        uint32_t time = millis();
+        uint32_t diff = time - effectStartTime;
+        if (diff > effectDuration) {
+            fill_solid(leds, NUM_LEDS, CRGB::Black);
+        } else {
+            uint32_t curBrightness = map(diff, 0, effectDuration, effectBrightness, 0);
+            for(uint8_t i = 0; i < NUM_LEDS; i++) {
+                CHSV color = effectHSVColor;
+                color.v = qsub8(curBrightness, random8(0, 15));
+                leds[i] = color;
+            }
+        }
+    }
+}
+
+void fireEffect(uint8_t isStart) {
+    if (isStart) {
+        frameStartTime = millis();
+        fill_solid(leds, NUM_LEDS, CHSV(0, 0, 0));
+        for( int i = 0; i < fireNumLeds; i++) {
+            heat[i] = 0;
+        }
+    }
+
+    if (!checkIsNewFrame(FRAME_DELAY)) return;
+
+    continueFire();
+}
+
+void continueFire() {
+    // #define fireNumLeds 70
+    #define FRAMES_PER_SECOND 60
+    #define FRAME_DELAY 1000/FRAMES_PER_SECOND
+    // COOLING: How much does the air cool as it rises?
+    // Less cooling = taller flames.  More cooling = shorter flames.
+    // Default 55, suggested range 20-100
+    #define COOLING 50
+
+    // SPARKING: What chance (out of 255) is there that a new spark will be lit?
+    // Higher chance = more roaring fire.  Lower chance = more flickery fire.
+    // Default 120, suggested range 50-200.
+    #define SPARKING 120
+
+    //---------------------
+    // Step 1.  Cool down every cell (up to the top) a little
+    for( int i = 0; i < fireNumLeds; i++) {
+      heat[i] = qsub8( heat[i],  random8(0, ((COOLING * 10) / fireNumLeds) + 2));
+    }
+
+    // process items above the fire top
+    for( int i = fireNumLeds; i < NUM_LEDS; i++) {
+      heat[i] = qsub8( heat[i],  random8(0, ((COOLING * 10) / NUM_LEDS) + 2));
+    }
+
+    //---------------------
+    // Step 2.  Heat from each cell drifts 'up' and diffuses a little
+    for( int k= fireNumLeds - 3; k > 0; k--) {
+      heat[k] = (heat[k - 1] + heat[k - 2] + heat[k - 2] ) / 3;
+    }
+
+    // process items above the fire top
+    for( int k= NUM_LEDS - 3; k > fireNumLeds; k--) {
+      heat[k] = (heat[k - 1] + heat[k - 2] + heat[k - 2] ) / 3;
+    }
+
+    //---------------------
+    // Step 3.  Randomly ignite new 'sparks' of heat near the bottom
+    if( random8() < SPARKING ) {
+      int y = random8(7);
+      heat[y] = qadd8( heat[y], random8(160,255) );
+    }
+
+    // Step 4.  Map from heat cells to LED colors
+    for( int j = 0; j < NUM_LEDS; j++) {
+        // Scale the heat value from 0-255 down to 0-240
+        // for best results with color palettes.
+        byte colorindex = scale8( heat[j], 240);
+        CRGB color = ColorFromPalette(firePalettesList[effectColorIndex], colorindex);
+
+        leds[j] = color;
+    }
+}
+
+void setBlack (uint8_t isStart) {
+    if (isStart) {
+        frameStartTime = millis();
+    }
+    if (!checkIsNewFrame(FRAME_DELAY)) return;
+    fade_raw(&leds[0], NUM_LEDS, 10);
+}
+
+void riseFire(uint8_t isStart) {
+    #define FRAMES_PER_SECOND 60
+    #define FRAME_DELAY 1000/FRAMES_PER_SECOND
+
+    if (isStart) {
+        effectStartTime = millis();
+        frameStartTime = effectStartTime;
+    } else {
+        if (!checkIsNewFrame(FRAME_DELAY)) return;
+
+        uint32_t time = millis();
+        uint32_t diff = time - effectStartTime;
+        if (diff > effectDuration) {
+            newEvent = 1;
+            currentEffect = 4; // keep fire
+            effectDuration = 800;
+        } else {
+            fireNumLeds = map(diff, 0, effectDuration, MIN_FIRE_LEDS, NUM_LEDS);
+            // fill heat with a gradient to current top
+            for( int i = 0; i < fireNumLeds; i++) {
+                heat[i] =  map(i, 0, fireNumLeds, 255, 0);
+            }
+            continueFire(); // continue fire with new number of leds
+        }
+    }
+}
+
+void keepTopFireLevel (uint8_t isStart) {
+    #define FRAMES_PER_SECOND 60
+    #define FRAME_DELAY 1000/FRAMES_PER_SECOND
+
+    if (isStart) {
+        effectStartTime = millis();
+        frameStartTime = effectStartTime;
+        fireNumLeds = NUM_LEDS;
+        continueFire(); // continue fire with top number of leds
+    } else {
+        if (!checkIsNewFrame(FRAME_DELAY)) return;
+
+        uint32_t time = millis();
+        uint32_t diff = time - effectStartTime;
+        if (diff > effectDuration) {
+            newEvent = 1;
+            currentEffect = 5; // tame fire
+            effectDuration = 2000;
+        } else {
+            continueFire();
+        }
+    }
+}
+
+void tameFire(uint8_t isStart) {
+    #define FRAMES_PER_SECOND 60
+    #define FRAME_DELAY 1000/FRAMES_PER_SECOND
+
+    if (isStart) {
+        effectStartTime = millis();
+        frameStartTime = effectStartTime;
+        fireNumLeds = NUM_LEDS;
+        continueFire(); // continue fire with new number of leds
+    } else {
+        if (!checkIsNewFrame(FRAME_DELAY)) return;
+
+        uint32_t time = millis();
+        uint32_t diff = time - effectStartTime;
+        if (diff > effectDuration) {
+            currentEffect = 1; // standard low fire
+            fireNumLeds = MIN_FIRE_LEDS;
+        } else {
+            fireNumLeds = map(diff, 0, effectDuration, NUM_LEDS, MIN_FIRE_LEDS);
+            continueFire();
+        }
+    }
+}
