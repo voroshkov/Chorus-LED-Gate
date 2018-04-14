@@ -29,15 +29,14 @@ SOFTWARE.
 #include <PinChangeInterrupt.h>
 
 #define INTERRUPT_PIN 12
-#define INTERRUPT_BTN1 3
-#define INTERRUPT_BTN2 2
-#define LED_DATA_PIN 6
-#define LED_DATA_PIN2 5
+// #define INTERRUPT_BTN1 3
+// #define INTERRUPT_BTN2 2
+#define LED_DATA_PIN 5
 
 #define COLOR_ORDER GRB
 #define CHIPSET     WS2811
 
-#define NUM_LEDS    144
+#define NUM_LEDS    216
 #define NO_FIRE_LEDS 10
 #define LOW_FIRE_LEDS 70
 #define TOP_FIRE_LEDS NUM_LEDS
@@ -66,6 +65,7 @@ SOFTWARE.
 #define EVENT_DRONE_2   1
 #define EVENT_DRONE_3   2
 #define EVENT_DRONE_4   3
+
 #define EVENT_START_RACE    10
 #define EVENT_TONE_1        11
 #define EVENT_TONE_2        12
@@ -75,7 +75,6 @@ SOFTWARE.
 
 
 CRGB leds[NUM_LEDS];
-CRGB leds2[NUM_LEDS];
 
 CHSV countdownCHSVColors[NUM_COUNDOWN_COLORS] = {
     CHSV(96, 255, 255), // green
@@ -147,7 +146,7 @@ DEFINE_GRADIENT_PALETTE( yellowFire_gp ) {
     255,   255,255,255    //white
 };
 
-CRGBPalette16 firePalettesList [5] = { redFire_gp, blueFire_gp, greenFire_gp, yellowFire_gp, HeatColors_p};
+CRGBPalette16 firePalettesList [5] = { redFire_gp, greenFire_gp, yellowFire_gp, blueFire_gp, HeatColors_p};
 
 // ----------------------------------------------------------------------------
 void setup() {
@@ -155,21 +154,21 @@ void setup() {
     PORTB = 0xFF; //all 8-13 pull-up, values will be inverted
 
     pinMode(INTERRUPT_PIN, INPUT_PULLUP);
-    pinMode(INTERRUPT_BTN1, INPUT_PULLUP);
-    pinMode(INTERRUPT_BTN2, INPUT_PULLUP);
+    // pinMode(INTERRUPT_BTN1, INPUT_PULLUP);
+    // pinMode(INTERRUPT_BTN2, INPUT_PULLUP);
 
     FastLED.addLeds<NEOPIXEL, LED_DATA_PIN>(leds, NUM_LEDS);
-    FastLED.addLeds<NEOPIXEL, LED_DATA_PIN2>(leds2, NUM_LEDS);
 
     delay(100); //just don't use LEDs immediately anyway
 
     FastLED.show(); // Initialize all pixels to 'off'
 
-    random16_add_entropy( random());
+    // random16_add_entropy(28);   // for module 1
+    random16_add_entropy(173);   // for module 2
 
     attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(INTERRUPT_PIN), intHandler, CHANGE);
-    attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(INTERRUPT_BTN1), btnHandler1, FALLING);
-    attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(INTERRUPT_BTN2), btnHandler2, FALLING);
+    // attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(INTERRUPT_BTN1), btnHandler1, FALLING);
+    // attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(INTERRUPT_BTN2), btnHandler2, FALLING);
 }
 
 // ----------------------------------------------------------------------------
@@ -208,15 +207,15 @@ void intHandler(void) {
     eventId = (~PINB) & 0xF;
 }
 
-// TODO: remove this handler ((((((DEBUG ONLY))))))
-void btnHandler1(void) {
-    effectPaletteIndex = ++effectPaletteIndex % 4;
-}
+// // TODO: remove this handler ((((((DEBUG ONLY))))))
+// void btnHandler1(void) {
+//     effectPaletteIndex = ++effectPaletteIndex % 4;
+// }
 
-// TODO: remove this handler ((((((((DEBUG ONLY))))))))
-void btnHandler2(void) {
-    setNewEffect(EFFECT_FIRE_OFF, 120);
-}
+// // TODO: remove this handler ((((((((DEBUG ONLY))))))))
+// void btnHandler2(void) {
+//     setNewEffect(EFFECT_FIRE_OFF, 120);
+// }
 
 void runCurrentEffect() {
     switch(currentEffect) {
@@ -296,7 +295,6 @@ void effectInstantFlashAndDissolve(uint8_t phase, uint32_t elapsedTime) {
                 CHSV color = effectHSVColor;
                 color.v = effectBrightness;
                 leds[i] = color;
-                leds2[i] = color;
             }
             break;
         case WORK_CYCLE_PHASE:
@@ -305,13 +303,10 @@ void effectInstantFlashAndDissolve(uint8_t phase, uint32_t elapsedTime) {
                 CHSV color = effectHSVColor;
                 color.v = qsub8(curBrightness, random8(0, 15));
                 leds[i] = color;
-                leds2[i] = color;
-
             }
             break;
         case END_PHASE:
             fill_solid(leds, NUM_LEDS, CRGB::Black);
-            fill_solid(leds2, NUM_LEDS, CRGB::Black);
             break;
     }
 }
@@ -322,7 +317,6 @@ void fadeToBlack (uint8_t phase, uint32_t elapsedTime) {
             break;
         case WORK_CYCLE_PHASE:
             fade_raw(&leds[0], NUM_LEDS, 20);
-            fade_raw(&leds2[0], NUM_LEDS, 20);
             break;
         case END_PHASE:
             break;
@@ -334,7 +328,6 @@ void fireEffect(uint8_t phase, uint32_t elapsedTime) {
         case START_PHASE:
             // set it all black to start fire from the bottom up to fireNumLeds
             fill_solid(leds, NUM_LEDS, CHSV(0, 0, 0));
-            fill_solid(leds2, NUM_LEDS, CHSV(0, 0, 0));
             for( int i = 0; i < fireNumLeds; i++) {
                 heat[i] = 0;
             }
@@ -427,7 +420,6 @@ void keepMinimumFireLevel (uint8_t phase, uint32_t elapsedTime) {
             break;
         case END_PHASE:
             fill_solid(leds, NUM_LEDS, CHSV(0, 0, 0));
-            fill_solid(leds2, NUM_LEDS, CHSV(0, 0, 0));
             setNewEffect(EFFECT_FADE_TO_BLACK, 0);
             break;
     }
@@ -481,45 +473,5 @@ void continueFire() {
         CRGB color = ColorFromPalette(firePalettesList[effectPaletteIndex], colorindex);
 
         leds[j] = color;
-    }
-
-// do the same for another leds strip
-    //---------------------
-    // Step 1.  Cool down every cell (up to the top) a little
-    for( int i = 0; i < fireNumLeds; i++) {
-      heat2[i] = qsub8( heat2[i],  random8(0, ((COOLING * 10) / fireNumLeds) + 2));
-    }
-
-    // process items above the fire top (to kill flames that remained after big fire)
-    for( int i = fireNumLeds; i < NUM_LEDS; i++) {
-      heat2[i] = qsub8( heat2[i],  random8(0, ((COOLING * 10) / NUM_LEDS) + 2));
-    }
-
-    //---------------------
-    // Step 2.  Heat from each cell drifts 'up' and diffuses a little
-    for( int k= fireNumLeds - 3; k > 0; k--) {
-      heat2[k] = (heat2[k - 1] + heat2[k - 2] + heat2[k - 2] ) / 3;
-    }
-
-    // process items above the fire top (to kill flames that remained after big fire)
-    for( int k= NUM_LEDS - 3; k > fireNumLeds; k--) {
-      heat2[k] = (heat2[k - 1] + heat2[k - 2] + heat2[k - 2] ) / 3;
-    }
-
-    //---------------------
-    // Step 3.  Randomly ignite new 'sparks' of heat2 near the bottom
-    if( random8() < SPARKING ) {
-      int y = random8(7);
-      heat2[y] = qadd8( heat2[y], random8(160,255) );
-    }
-
-    // Step 4.  Map from heat2 cells to LED colors
-    for( int j = 0; j < NUM_LEDS; j++) {
-        // Scale the heat2 value from 0-255 down to 0-240
-        // for best results with color palettes.
-        byte colorindex = scale8( heat2[j], 240);
-        CRGB color = ColorFromPalette(firePalettesList[effectPaletteIndex], colorindex);
-
-        leds2[j] = color;
     }
 }
