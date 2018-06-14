@@ -1,6 +1,7 @@
 # Flashing:
 
 Flash first arduino with `chorus_led_module.ino`
+
 Flash subsequent modules with `WS2812-driver.ino`
 
 # Commands for Chorus to drive the Led Module:
