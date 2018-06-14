@@ -25,6 +25,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#include <EEPROM.h>
 #include <FastLED.h>
 #include <PinChangeInterrupt.h>
 
@@ -41,7 +42,6 @@ SOFTWARE.
 #define LOW_FIRE_LEDS 70
 #define TOP_FIRE_LEDS NUM_LEDS
 
-// #define NUM_COLORS  6
 #define NUM_COUNDOWN_COLORS 4
 
 // effects
@@ -54,25 +54,22 @@ SOFTWARE.
 #define EFFECT_FIRE_OFF             6
 #define EFFECT_KEEP_MIN_FIRE_LEVEL  7
 
-
 // single effect phases
 #define START_PHASE         0
 #define WORK_CYCLE_PHASE    1
 #define END_PHASE           2
 
-// event ids
-#define EVENT_DRONE_1   0
-#define EVENT_DRONE_2   1
-#define EVENT_DRONE_3   2
-#define EVENT_DRONE_4   3
+#define CMD_PREPARE     0x11
+#define CMD_COUNTDOWN_3 0x12
+#define CMD_COUNTDOWN_2 0x13
+#define CMD_COUNTDOWN_1 0x14
+#define CMD_START_RACE  0x15
+#define CMD_END_RACE    0x16
 
-#define EVENT_START_RACE    10
-#define EVENT_TONE_1        11
-#define EVENT_TONE_2        12
-#define EVENT_TONE_3        13
-#define EVENT_PREPARE_RACE  14
-#define EVENT_STOP_RACE     15
+#define CMD_LAP_DRONE_1 0x21
+#define CMD_LAP_DRONE_8 0x28
 
+#define CMD_SET_COLOR_INDEX_HI 0x30
 
 CRGB leds[NUM_LEDS];
 
@@ -93,7 +90,7 @@ CHSV countdownCHSVColors[NUM_COUNDOWN_COLORS] = {
 // };
 
 volatile uint8_t isNewEventOccurred = 0;
-volatile uint8_t eventId = EVENT_STOP_RACE;
+volatile uint8_t eventId = CMD_END_RACE;
 
 uint8_t currentEffect = EFFECT_ETERNAL_FIRE;
 uint32_t effectDuration = 0; // zero means forever. otherwise - desired effect duration in ms
@@ -125,9 +122,9 @@ DEFINE_GRADIENT_PALETTE( redFire_gp ) {
 
 DEFINE_GRADIENT_PALETTE( blueFire_gp ) {
       0,     0,  0,  0,   //black
-     30,   0, 10, 10,
+     30,   0, 17, 10,
     120,   0,  0,  250,   //blue
-    199,   0, 200, 255,
+    199,   200, 150, 200,
     255,   255,255,255    //white
 };
 
@@ -146,7 +143,13 @@ DEFINE_GRADIENT_PALETTE( yellowFire_gp ) {
     255,   255,255,255    //white
 };
 
-CRGBPalette16 firePalettesList [5] = { redFire_gp, greenFire_gp, yellowFire_gp, blueFire_gp, HeatColors_p};
+// CRGBPalette16 firePalettesList [5] = { redFire_gp, greenFire_gp, yellowFire_gp, blueFire_gp, HeatColors_p};
+CRGBPalette16 firePalettesList [5] = { redFire_gp, yellowFire_gp, greenFire_gp, blueFire_gp, HeatColors_p };
+
+#define MAX_MODULES_COUNT 8
+#define MAX_COLORS_COUNT 4 // TODO: use this const in colors/palettes definition arrays
+
+uint8_t moduleToColorMap[MAX_MODULES_COUNT]; // read from EEPROM on setup, set via commands
 
 // ----------------------------------------------------------------------------
 void setup() {
@@ -163,35 +166,50 @@ void setup() {
 
     FastLED.show(); // Initialize all pixels to 'off'
 
-    // random16_add_entropy(28);   // for module 1
-    random16_add_entropy(173);   // for module 2
+    random16_add_entropy(28);   // for module 1
+    // random16_add_entropy(173);   // for module 2
+
+    readModuleColorsFromEEPROM();
 
     attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(INTERRUPT_PIN), intHandler, CHANGE);
     // attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(INTERRUPT_BTN1), btnHandler1, FALLING);
     // attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(INTERRUPT_BTN2), btnHandler2, FALLING);
+
+    // Serial.begin(115200);
 }
 
 // ----------------------------------------------------------------------------
 void loop() {
     if (isNewEventOccurred) {
         isNewEventOccurred = 0;
-        if (eventId >= EVENT_DRONE_1 && eventId <= EVENT_DRONE_4) { // drone passed
+        if (eventId >= CMD_LAP_DRONE_1 && eventId <= CMD_LAP_DRONE_8) { // drone passed
             setNewEffect(EFFECT_RISE_FIRE, 140); // it's a sequence of effects actually
-            effectPaletteIndex = eventId;
-        } else if (eventId >= EVENT_TONE_1 && eventId <= EVENT_TONE_3) { // start sequence
+            uint8_t moduleId = eventId - CMD_LAP_DRONE_1;
+            effectPaletteIndex = moduleToColorMap[moduleId];
+        } else if (eventId == CMD_COUNTDOWN_3) { // start sequence
             setNewEffect(EFFECT_FLASH_DISSOLVE, 1500);
             effectBrightness = 200;
-            effectHSVColor = countdownCHSVColors[eventId - 10];
-        } else if (eventId == EVENT_START_RACE) { // start race
+            effectHSVColor = countdownCHSVColors[3];
+        } else if (eventId == CMD_COUNTDOWN_2) { // start sequence
+            setNewEffect(EFFECT_FLASH_DISSOLVE, 1500);
+            effectBrightness = 200;
+            effectHSVColor = countdownCHSVColors[2];
+        } else if (eventId == CMD_COUNTDOWN_1) { // start sequence
+            setNewEffect(EFFECT_FLASH_DISSOLVE, 1500);
+            effectBrightness = 200;
+            effectHSVColor = countdownCHSVColors[1];
+        } else if (eventId == CMD_START_RACE) { // start race
             setNewEffect(EFFECT_FLASH_DISSOLVE, 2500);
             effectBrightness = 200;
-            effectHSVColor = countdownCHSVColors[eventId - 10];
-        } else if (eventId == EVENT_STOP_RACE) { // race finished, switch to default effect
+            effectHSVColor = countdownCHSVColors[0];
+        } else if (eventId == CMD_END_RACE) { // race finished, switch to default effect
             fireNumLeds = LOW_FIRE_LEDS;
             setNewEffect(EFFECT_ETERNAL_FIRE, 0);
             effectPaletteIndex = 4; //real fire heatmap
-        } else if (eventId == EVENT_PREPARE_RACE) { // prepare to race
+        } else if (eventId == CMD_PREPARE) { // prepare to race
             setNewEffect(EFFECT_FIRE_OFF, 1000);
+        } else if ((eventId >= CMD_SET_COLOR_INDEX_HI) && (eventId <= CMD_SET_COLOR_INDEX_HI + (MAX_COLORS_COUNT << 4))) {
+            setColorForModule((eventId - CMD_SET_COLOR_INDEX_HI) >> 4 , (eventId & 0xF) - 1); // decrease module idx by 1 to use zero-based indexes
         }
     }
 
@@ -202,9 +220,31 @@ void loop() {
 
 // ----------------------------------------------------------------------------
 void intHandler(void) {
-    isNewEventOccurred = 1;
+    static volatile uint8_t commandSequenceId = 0;
+    static volatile uint8_t commandHi;
+    static volatile uint8_t commandLo;
+
+
     // portb data is inverted
-    eventId = (~PINB) & 0xF;
+    volatile uint8_t data = (~PINB) & 0xF;
+    switch(commandSequenceId) {
+        case 0:
+            if (data == 0) {
+                commandSequenceId = 1;
+            }
+            break;
+        case 1:
+            commandHi = data;
+            commandSequenceId = 2;
+
+            break;
+        case 2:
+            commandLo = data;
+            commandSequenceId = 0;
+            isNewEventOccurred = 1;
+            eventId = (commandHi << 4) | commandLo;
+            break;
+    }
 }
 
 // // TODO: remove this handler ((((((DEBUG ONLY))))))
@@ -216,6 +256,23 @@ void intHandler(void) {
 // void btnHandler2(void) {
 //     setNewEffect(EFFECT_FIRE_OFF, 120);
 // }
+
+void readModuleColorsFromEEPROM() {
+    for(uint8_t i = 0; i < MAX_MODULES_COUNT; i++) {
+        uint8_t value = EEPROM.read(i);
+        if (value > MAX_COLORS_COUNT) {
+            value = 0;
+        }
+        moduleToColorMap[i] = value;
+    }
+}
+
+void setColorForModule(uint8_t colorIdx, uint8_t moduleIdx) {
+    if (colorIdx < MAX_COLORS_COUNT && moduleIdx < MAX_MODULES_COUNT) {
+        EEPROM.update(moduleIdx, colorIdx);
+        moduleToColorMap[moduleIdx] = colorIdx;
+    }
+}
 
 void runCurrentEffect() {
     switch(currentEffect) {

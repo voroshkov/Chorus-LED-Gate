@@ -34,9 +34,6 @@ SOFTWARE.
     #define DEBUG_CODE(x) do { } while(0)
 #endif
 
-uint8_t MODULE_ID = 0;
-uint8_t MODULE_ID_HEX = '0';
-
 #define PORTB_BIT_PIN_INTERRUPT 4 // using PIN12 (bit 4 on PORTB) to generate interrupts on LED driving arduino
 
 #define SERIAL_DATA_DELIMITER '\n'
@@ -46,55 +43,26 @@ uint8_t MODULE_ID_HEX = '0';
 #define BAUDRATE 115200
 
 // input control byte constants
-#define CONTROL_START_RACE      'R'
-#define CONTROL_START_RACE_ABS  'P' // race with absolute laps timing
-#define CONTROL_END_RACE        'r'
-#define CONTROL_DEC_MIN_LAP     'm'
-#define CONTROL_INC_MIN_LAP     'M'
-#define CONTROL_DEC_CHANNEL     'c'
-#define CONTROL_INC_CHANNEL     'C'
-#define CONTROL_DEC_THRESHOLD   't'
-#define CONTROL_INC_THRESHOLD   'T'
-#define CONTROL_SET_THRESHOLD   'S' // it either triggers or sets an uint16 depending on command length
-#define CONTROL_SET_SOUND       'D'
-#define CONTROL_DATA_REQUEST    'A'
-#define CONTROL_INC_BAND        'B'
-#define CONTROL_DEC_BAND        'b'
-#define CONTROL_START_CALIBRATE 'I'
-#define CONTROL_END_CALIBRATE   'i'
-#define CONTROL_MONITOR_ON      'V'
-#define CONTROL_MONITOR_OFF     'v'
-#define CONTROL_SET_SKIP_LAP0   'F'
-#define CONTROL_GET_VOLTAGE     'Y'
-#define CONTROL_GET_API_VERSION '#'
-// input control byte constants for uint16 "set value" commands
-#define CONTROL_SET_FREQUENCY   'Q'
-// input control byte constants for long "set value" commands
-#define CONTROL_SET_MIN_LAP     'L'
-#define CONTROL_SET_CHANNEL     'H'
-#define CONTROL_SET_BAND        'N'
+#define CONTROL_COMMAND_RACE      'R'
+#define CONTROL_VALUE_END_RACE      '0'
 
 #define CONTROL_START_COUNTER_PREPARE '1'
 #define CONTROL_START_COUNTER_GO '2'
 
 // output id byte constants
-#define RESPONSE_CHANNEL        'C'
-#define RESPONSE_RACE_STATE     'R'
-#define RESPONSE_MIN_LAP_TIME   'M'
-#define RESPONSE_THRESHOLD      'T'
-#define RESPONSE_CURRENT_RSSI   'S'
 #define RESPONSE_LAPTIME        'L'
-#define RESPONSE_SOUND_STATE    'D'
-#define RESPONSE_BAND           'B'
-#define RESPONSE_CALIBR_TIME    'I'
-#define RESPONSE_CALIBR_STATE   'i'
-#define RESPONSE_MONITOR_STATE  'V'
-#define RESPONSE_LAP0_STATE     'F'
-#define RESPONSE_END_SEQUENCE   'X'
-#define RESPONSE_IS_CONFIGURED  'P'
-#define RESPONSE_VOLTAGE        'Y'
-#define RESPONSE_FREQUENCY      'Q'
-#define RESPONSE_API_VERSION    '#'
+
+#define CMD_PREPARE     0x11
+#define CMD_COUNTDOWN_3 0x12
+#define CMD_COUNTDOWN_2 0x13
+#define CMD_COUNTDOWN_1 0x14
+#define CMD_START_RACE  0x15
+#define CMD_END_RACE    0x16
+
+#define CMD_LAP_DRONE_HI 0x20
+
+#define CMD_SET_COLOR_INDEX_HI 0x30
+
 
 //----- other globals------------------------------
 uint8_t isRaceStarted = 0;
@@ -121,55 +89,79 @@ void setup() {
     PORTB = 0xFF; // all high because corresponding module has pull-ups enabled and expects inverted data
 
     Serial.begin(BAUDRATE);
+
+    delay(200);
+    sendCommand(0); // just to warm up and make sure that first command won't be lost
 }
 
 // ----------------------------------------------------------------------------
 void loop() {
     readSerialDataChunk(); //read passing data and do something in specific cases
-    // sendProxyDataChunk(); //... and just pass all the data further
 }
 
+void sendCommand(uint8_t command) {
+    PORTB &= 0xF0; // clear low 4 bits
+    PORTB |= 0x0F; // output inverted zero (start of send sequence)
+    PORTB ^=(1<<PORTB_BIT_PIN_INTERRUPT); // toggle the value to generate interrupt on receiving controller
+    delay(10);
+
+    PORTB &= 0xF0; // clear low 4 bits
+    PORTB |= 0xF & (~(command >> 4)); // output inverted high 4 bits
+    PORTB ^=(1<<PORTB_BIT_PIN_INTERRUPT); // toggle the value to generate interrupt on receiving controller
+    delay(10);
+
+    PORTB &= 0xF0; // clear low 4 bits
+    PORTB |= 0xF & (~(command)); // output inverted low 4 bits
+    PORTB ^=(1<<PORTB_BIT_PIN_INTERRUPT); // toggle the value to generate interrupt on receiving controller
+    delay(10);
+}
 // ----------------------------------------------------------------------------
 void handleSerialRequest(uint8_t *controlData, uint8_t length) {
     uint8_t deviceId = TO_BYTE(controlData[0]);
-    uint8_t controlByte = controlData[1];
+    uint8_t controlByteCommand = controlData[1];
+    uint8_t controlByteValue = controlData[2];
 
-    switch (controlByte) {
-        case CONTROL_START_RACE:
-            isRaceStarted = 1;
-            PORTB &= 0xF0; // clear low 4 bits
-            PORTB |= 0xF & (~0xA); // output 10 for start race
-            PORTB ^=(1<<PORTB_BIT_PIN_INTERRUPT); // toggle the value to generate interrupt on receiving controller
-            break;
-        case CONTROL_START_RACE_ABS:
-            isRaceStarted = 1;
-            PORTB &= 0xF0; // clear low 4 bits
-            PORTB |= 0xF & (~0xA); // output 10 for start race
-            PORTB ^=(1<<PORTB_BIT_PIN_INTERRUPT); // toggle the value to generate interrupt on receiving controller
-            break;
-        case CONTROL_END_RACE:
+    if(controlByteCommand == CONTROL_COMMAND_RACE) {
+        if (controlByteValue == CONTROL_VALUE_END_RACE) {
             isRaceStarted = 0;
-            PORTB &= 0xF0; // clear low 4 bits
-            PORTB |= 0xF & (~15); // output 15 for end race and switch back to default effect
-            PORTB ^=(1<<PORTB_BIT_PIN_INTERRUPT); // toggle the value to generate interrupt on receiving controller
-            break;
+            sendCommand(CMD_END_RACE) ; // end race and switch back to default effect
+        }
+        else {
+            isRaceStarted = 1;
+            sendCommand(CMD_START_RACE) ; // start race
+        }
     }
 }
 
 // ----------------------------------------------------------------------------
 void handleDedicatedSerialRequest(uint8_t *controlData, uint8_t length) {
     if (controlData[0] == 'P') {
-        PORTB &= 0xF0; // clear low 4 bits
-        PORTB |= 0xF & (~(14)); // output 14 for prepare to countdown
-        PORTB ^=(1<<PORTB_BIT_PIN_INTERRUPT); // toggle the value to generate interrupt on receiving controller
+        sendCommand(CMD_PREPARE) ; // prepare to countdown
+        return;
+    }
+
+    if (controlData[0] == 'C') {
+        uint8_t moduleIndex = TO_BYTE(controlData[1]);
+        uint8_t colorIndex = TO_BYTE(controlData[2]);
+        uint8_t command = CMD_SET_COLOR_INDEX_HI + (colorIndex << 4);
+        command |= moduleIndex + 1; // add 1 to index to avoid using zeros in commands (because starting zero is used to identify start of transmission)
+        sendCommand(command);
         return;
     }
 
     uint8_t controlByte = TO_BYTE(controlData[0]);
     if (controlByte > 0 && controlByte < 4) {
-        PORTB &= 0xF0; // clear low 4 bits
-        PORTB |= 0xF & (~(controlByte + 0xA)); // output 13-11 for countdown
-        PORTB ^=(1<<PORTB_BIT_PIN_INTERRUPT); // toggle the value to generate interrupt on receiving controller
+        switch(controlByte) {
+            case 3:
+                sendCommand(CMD_COUNTDOWN_3);
+                break;
+            case 2:
+                sendCommand(CMD_COUNTDOWN_2);
+                break;
+            case 1:
+                sendCommand(CMD_COUNTDOWN_1);
+                break;
+        }
     }
 }
 
@@ -180,10 +172,7 @@ void handleSerialResponse(uint8_t *responseData, uint8_t length) {
 
     switch (responseCode) {
         case RESPONSE_LAPTIME:
-            // if (!isRaceStarted) break;
-            PORTB &= 0xF0; // clear low 4 bits
-            PORTB |= 0xF & (~deviceId); // output inverted low 4 bits of deviceId to PORTB (pins 8 - 11)
-            PORTB ^=(1<<PORTB_BIT_PIN_INTERRUPT); // toggle the value to generate interrupt on receiving controller
+            sendCommand(CMD_LAP_DRONE_HI | (deviceId + 1)) ; // lap register command with device id
             break;
     }
 };
@@ -245,11 +234,3 @@ void readSerialDataChunk () {
         }
     }
 }
-// // ----------------------------------------------------------------------------
-// void sendProxyDataChunk () {
-//     if (proxyBufDataSize && Serial.availableForWrite() > proxyBufDataSize) {
-//         Serial.write(proxyBuf, proxyBufDataSize);
-//         Serial.write(SERIAL_DATA_DELIMITER);
-//         proxyBufDataSize = 0;
-//     }
-// }
