@@ -24,6 +24,7 @@ Flash subsequent modules with `WS2812-driver.ino`
 ## Setting colors:
 
 Possible Color indices:
+
 - 0 - Red
 - 1 - Yellow
 - 2 - Green
