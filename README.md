@@ -1,28 +1,32 @@
 # Flashing:
 
 Flash first arduino with `chorus_led_module.ino`
+
 Flash subsequent modules with `WS2812-driver.ino`
 
 # Commands for Chorus to drive the Led Module:
 
 ## Generic:
 
-| Description          | Command          |
-|----------------------|------------------|
-| Prepare to countdown | `TP`             |
-| Countdown 3          | `T3`             |
-| Countdown 2          | `T2`             |
-| Countdown 1          | `T1`             |
-| Start race           | `R*R1 (or R*R2)` |
-| End race             | `R*R0`           |
-| Lap Racer #0         | `S0Lxyyyyyyyy`   |
-| Lap Racer #1         | `S1Lxyyyyyyyy`   |
-| Lap Racer #2         | `S2Lxyyyyyyyy`   |
-| Lap Racer #3         | `S3Lxyyyyyyyy`   |
+| Description          | Command          | Example |
+|----------------------|------------------|------|
+| Prepare to countdown | `TP`             | none |
+| Countdown 3          | `T3`             | none |
+| Countdown 2          | `T2`             | none |
+| Countdown 1          | `T1`             | none |
+| Start race           | `R*R1 (or R*R2)` | none |
+| End race             | `R*R0`           | none |
+| Lap Racer #0         | `S0Lxyyyyyyyy`   | none |
+| Lap Racer #1         | `S1Lxyyyyyyyy`   | none |
+| Lap Racer #2         | `S2Lxyyyyyyyy`   | none |
+| Lap Racer #3         | `S3Lxyyyyyyyy`   | none |
 
 ## Setting colors:
 
+These commands store the selected matching of colors to Chorus nodes in Arduino EEPROMs, so once set - the colors are saved for subsequent usage.
+
 Possible Color indices:
+
 - 0 - Red
 - 1 - Yellow
 - 2 - Green
