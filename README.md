@@ -14,12 +14,19 @@ Flash subsequent modules with `WS2812-driver.ino`
 | Countdown 3          | `T3`             | none |
 | Countdown 2          | `T2`             | none |
 | Countdown 1          | `T1`             | none |
-| Start race           | `R*R1 (or R*R2)` | none |
+| Start race           | `R*R1` (or `R*R2)` | none |
 | End race             | `R*R0`           | none |
 | Lap Racer #0         | `S0Lxyyyyyyyy`   | none |
 | Lap Racer #1         | `S1Lxyyyyyyyy`   | none |
 | Lap Racer #2         | `S2Lxyyyyyyyy`   | none |
 | Lap Racer #3         | `S3Lxyyyyyyyy`   | none |
+| ...                  |  ...             | none |
+| Lap Racer #7         | `S7Lxyyyyyyyy`   | none |
+| Start calibration    | `R*H1` (or `S<module>H1`) | none |
+| Calibration stage 2  | `S<module>H2`    | none |
+| Calibration end      | `S<module>H0`    | none |
+| Set modules count (for calibration and showing color assignments) | `TN<modules_count>` | none |
+
 
 ## Setting colors:
 
@@ -31,10 +38,17 @@ Possible Color indices:
 - 1 - Yellow
 - 2 - Green
 - 3 - Blue
+- 4 - Orange
+- 5 - Aqua
+- 6 - Purple
+- 7 - Pink
 
 | Description      | Command            | Example                   |
 |------------------|--------------------|---------------------------|
+| Show color assignments | `TS`    |  |
 | Set Color for #0 | `TC0<color_index>` | `TC03` - blue on node #0  |
 | Set Color for #1 | `TC1<color_index>` | `TC12` - green on node #1 |
 | Set Color for #2 | `TC2<color_index>` | `TC21` - yellow on node # |
 | Set Color for #3 | `TC3<color_index>` | `TC30` - red on node #3   |
+| ... | ... | ... |
+| Set Color for #7 | `TC7<color_index>` | `TC75` - aqua on node #7  |
