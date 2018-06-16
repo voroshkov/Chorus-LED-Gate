@@ -44,15 +44,21 @@ SOFTWARE.
 
 #define NUM_COUNDOWN_COLORS 4
 
+#define MAX_MODULES_COUNT 8
+#define MAX_COLORS_COUNT 8 // TODO: use this const in colors/palettes definition arrays
+#define MAX_THRESHOLD_SETUP_STATUSES_COUNT 3
+
 // effects
-#define EFFECT_FLASH_DISSOLVE       0
-#define EFFECT_ETERNAL_FIRE         1
-#define EFFECT_FADE_TO_BLACK        2
-#define EFFECT_RISE_FIRE            3
-#define EFFECT_KEEP_TOP_FIRE_LEVEL  4
-#define EFFECT_TAME_FIRE            5
-#define EFFECT_FIRE_OFF             6
-#define EFFECT_KEEP_MIN_FIRE_LEVEL  7
+#define EFFECT_FLASH_DISSOLVE         0
+#define EFFECT_ETERNAL_FIRE           1
+#define EFFECT_FADE_TO_BLACK          2
+#define EFFECT_RISE_FIRE              3
+#define EFFECT_KEEP_TOP_FIRE_LEVEL    4
+#define EFFECT_TAME_FIRE              5
+#define EFFECT_FIRE_OFF               6
+#define EFFECT_KEEP_MIN_FIRE_LEVEL    7
+#define EFFECT_SHOW_COLORS            8
+#define EFFECT_SHOW_THRESHOLD_SETUP   9
 
 // single effect phases
 #define START_PHASE         0
@@ -65,11 +71,15 @@ SOFTWARE.
 #define CMD_COUNTDOWN_1 0x14
 #define CMD_START_RACE  0x15
 #define CMD_END_RACE    0x16
+#define CMD_SHOW_COLORS 0x17
+#define CMD_THRESHOLD_SETUP_START 0x1F
 
 #define CMD_LAP_DRONE_1 0x21
 #define CMD_LAP_DRONE_8 0x28
 
 #define CMD_SET_COLOR_INDEX_HI 0x30
+#define CMD_SETUP_THRESHOLD_STATUS_HI 0xB0 // 0x30 + 0x80 (because 8 colors might be used for color commands)
+#define CMD_SET_MODULES_COUNT_HI 0xE0
 
 CRGB leds[NUM_LEDS];
 
@@ -79,15 +89,6 @@ CHSV countdownCHSVColors[NUM_COUNDOWN_COLORS] = {
     CHSV(10, 255, 255),
     CHSV(0, 255, 255)   // red
 };
-
-// CHSV CHSVcolors[NUM_COLORS] = {
-//     CHSV(0, 255, 255), // red
-//     CHSV(96, 255, 255), // green
-//     CHSV(160, 255, 255), // blue
-//     CHSV(64, 255, 255),  // yellow
-//     CHSV(224, 255, 255),  // pink
-//     CHSV(0, 0, 255)  // white
-// };
 
 volatile uint8_t isNewEventOccurred = 0;
 volatile uint8_t eventId = CMD_END_RACE;
@@ -99,12 +100,11 @@ uint8_t isNewEffect = 1; // flag that indicates new captured interrupt
 // these vars are specific to different effects
 uint8_t effectBrightness = 255; // used in flash'n'dissolve effect
 CHSV effectHSVColor; // used in flash'n'dissolve effect
-uint8_t effectPaletteIndex = 4; // used in fire effect
+uint8_t effectPaletteIndex = MAX_COLORS_COUNT; // used in fire effect
 uint8_t fireNumLeds = LOW_FIRE_LEDS; // used in fire effect
 
 // Array of fire temperature readings at each simulation cell
 byte heat[NUM_LEDS];
-byte heat2[NUM_LEDS];
 
 DEFINE_GRADIENT_PALETTE( heatmap_gp ) {
       0,     0,  0,  0,   //black
@@ -143,13 +143,52 @@ DEFINE_GRADIENT_PALETTE( yellowFire_gp ) {
     255,   255,255,255    //white
 };
 
-// CRGBPalette16 firePalettesList [5] = { redFire_gp, greenFire_gp, yellowFire_gp, blueFire_gp, HeatColors_p};
-CRGBPalette16 firePalettesList [5] = { redFire_gp, yellowFire_gp, greenFire_gp, blueFire_gp, HeatColors_p };
+DEFINE_GRADIENT_PALETTE( orangeFire_gp ) {
+      0,     0,  0,  0,   //black
+     30,   50, 20, 0,     //darker orange
+    130,   255, 140, 0,   //orange
+    255,   255,255,255    //white
+};
 
-#define MAX_MODULES_COUNT 8
-#define MAX_COLORS_COUNT 4 // TODO: use this const in colors/palettes definition arrays
+DEFINE_GRADIENT_PALETTE( purpleFire_gp ) {
+      0,     0,  0,  0,   //black
+     30,   50, 20, 0,     //darker orange
+    130,   160, 32, 240,   //purple
+    255,   255,255,255    //white
+};
+
+DEFINE_GRADIENT_PALETTE( aquaFire_gp ) {
+      0,     0,  0,  0,   //black
+     30,   50, 20, 0,     //darker orange
+    130,   107, 255, 212,   //aquamarine
+    255,   255,255,255    //white
+};
+
+DEFINE_GRADIENT_PALETTE( pinkFire_gp ) {
+      0,     0,  0,  0,   //black
+     30,   139, 10, 80,   //darker pink
+     30,   255, 20, 150,  //pink
+    255,   255,255,255    //white
+};
+
+// the following arrays should have matching colors up to MAX_COLORS_COUNT: red, yellow, green, blue
+CRGBPalette16 firePalettesList [MAX_COLORS_COUNT + 1] = { redFire_gp, yellowFire_gp, greenFire_gp, blueFire_gp, orangeFire_gp, aquaFire_gp, purpleFire_gp, pinkFire_gp, HeatColors_p };
+CHSV droneColors[MAX_COLORS_COUNT] = {
+    CHSV(0, 255, 255), // red
+    CHSV(64, 255, 255),  // yellow
+    CHSV(96, 255, 255), // green
+    CHSV(160, 255, 255), // blue
+    CHSV(32, 255, 255), // orange
+    CHSV(128, 255, 255), // aqua
+    CHSV(192, 255, 255), // purple
+    CHSV(224, 255, 255), // pink
+};
 
 uint8_t moduleToColorMap[MAX_MODULES_COUNT]; // read from EEPROM on setup, set via commands
+
+uint8_t modulesInUse = 4; // number of modules in use; needed for calibration and colors demo
+
+uint8_t thresholdSetupPhases[MAX_MODULES_COUNT];
 
 // ----------------------------------------------------------------------------
 void setup() {
@@ -182,34 +221,64 @@ void setup() {
 void loop() {
     if (isNewEventOccurred) {
         isNewEventOccurred = 0;
+        // Serial.print("event ");
+        // Serial.println(eventId);
         if (eventId >= CMD_LAP_DRONE_1 && eventId <= CMD_LAP_DRONE_8) { // drone passed
             setNewEffect(EFFECT_RISE_FIRE, 140); // it's a sequence of effects actually
             uint8_t moduleId = eventId - CMD_LAP_DRONE_1;
             effectPaletteIndex = moduleToColorMap[moduleId];
+
         } else if (eventId == CMD_COUNTDOWN_3) { // start sequence
             setNewEffect(EFFECT_FLASH_DISSOLVE, 1500);
             effectBrightness = 200;
             effectHSVColor = countdownCHSVColors[3];
+
         } else if (eventId == CMD_COUNTDOWN_2) { // start sequence
             setNewEffect(EFFECT_FLASH_DISSOLVE, 1500);
             effectBrightness = 200;
             effectHSVColor = countdownCHSVColors[2];
+
         } else if (eventId == CMD_COUNTDOWN_1) { // start sequence
             setNewEffect(EFFECT_FLASH_DISSOLVE, 1500);
             effectBrightness = 200;
             effectHSVColor = countdownCHSVColors[1];
+
         } else if (eventId == CMD_START_RACE) { // start race
             setNewEffect(EFFECT_FLASH_DISSOLVE, 2500);
             effectBrightness = 200;
             effectHSVColor = countdownCHSVColors[0];
+
         } else if (eventId == CMD_END_RACE) { // race finished, switch to default effect
             fireNumLeds = LOW_FIRE_LEDS;
             setNewEffect(EFFECT_ETERNAL_FIRE, 0);
-            effectPaletteIndex = 4; //real fire heatmap
+            effectPaletteIndex = MAX_COLORS_COUNT; // real fire heatmap is the last in palette
+
         } else if (eventId == CMD_PREPARE) { // prepare to race
-            setNewEffect(EFFECT_FIRE_OFF, 1000);
+            if (currentEffect == EFFECT_ETERNAL_FIRE) {
+                setNewEffect(EFFECT_FIRE_OFF, 1000);
+            }
+        } else if (eventId == CMD_SHOW_COLORS) { // prepare to race
+            setNewEffect(EFFECT_SHOW_COLORS, modulesInUse * 700);
+
+        } else if (eventId >= CMD_SET_MODULES_COUNT_HI && eventId <= CMD_SET_MODULES_COUNT_HI + MAX_MODULES_COUNT) { // set used number of modules
+            modulesInUse = eventId - CMD_SET_MODULES_COUNT_HI;
+            setNewEffect(EFFECT_SHOW_COLORS, modulesInUse * 700);
+
+        } else if (eventId == CMD_THRESHOLD_SETUP_START) { // start setting up threshold
+            clearThresholdSetupPhases();
+            setNewEffect(EFFECT_SHOW_THRESHOLD_SETUP, 0);
+
         } else if ((eventId >= CMD_SET_COLOR_INDEX_HI) && (eventId <= CMD_SET_COLOR_INDEX_HI + (MAX_COLORS_COUNT << 4))) {
             setColorForModule((eventId - CMD_SET_COLOR_INDEX_HI) >> 4 , (eventId & 0xF) - 1); // decrease module idx by 1 to use zero-based indexes
+
+        } else if ((eventId >= CMD_SETUP_THRESHOLD_STATUS_HI) && (eventId <= CMD_SETUP_THRESHOLD_STATUS_HI + (MAX_THRESHOLD_SETUP_STATUSES_COUNT << 4))) {
+            uint8_t moduleId = (eventId & 0xF) - 1; // decrease module idx by 1 to use zero-based indexes
+            uint8_t statusId = (eventId - CMD_SETUP_THRESHOLD_STATUS_HI) >> 4;
+            thresholdSetupPhases[moduleId] = statusId;
+            if (statusId == 1) {
+                clearThresholdSetupPhases();
+                setNewEffect(EFFECT_SHOW_THRESHOLD_SETUP, 0);
+            }
         }
     }
 
@@ -257,6 +326,14 @@ void intHandler(void) {
 //     setNewEffect(EFFECT_FIRE_OFF, 120);
 // }
 
+void clearThresholdSetupPhases() {
+    for(int i = 0; i < MAX_MODULES_COUNT; i++) {
+        if (thresholdSetupPhases[i] != 1) {
+            thresholdSetupPhases[i] = 255; // some non-existing value
+        }
+    }
+}
+
 void readModuleColorsFromEEPROM() {
     for(uint8_t i = 0; i < MAX_MODULES_COUNT; i++) {
         uint8_t value = EEPROM.read(i);
@@ -299,6 +376,12 @@ void runCurrentEffect() {
             break;
         case EFFECT_KEEP_MIN_FIRE_LEVEL:
             effectRunner(keepMinimumFireLevel, 60);
+            break;
+        case EFFECT_SHOW_COLORS:
+            effectRunner(showColorsEffect, 30);
+            break;
+        case EFFECT_SHOW_THRESHOLD_SETUP:
+            effectRunner(showThresholdSetupEffect, 60);
             break;
     }
 }
@@ -364,6 +447,146 @@ void effectInstantFlashAndDissolve(uint8_t phase, uint32_t elapsedTime) {
             break;
         case END_PHASE:
             fill_solid(leds, NUM_LEDS, CRGB::Black);
+            break;
+    }
+}
+
+void showColorsEffect(uint8_t phase, uint32_t elapsedTime) {
+    #define COLOR_BREAK_LENGTH 4 // number of leds to remain black between colored areas
+
+    uint8_t sectionLength = NUM_LEDS / modulesInUse;
+    uint8_t colorLedsCount = sectionLength - COLOR_BREAK_LENGTH;
+    elapsedTime = constrain(elapsedTime, 0, effectDuration);
+    uint32_t moduleTime = (effectDuration / modulesInUse) / 2; // show in sequence for half-time, then just let shine for another half
+    uint32_t fadeInTime = moduleTime / 2;
+    uint8_t currentModuleIdx = constrain(elapsedTime / moduleTime, 0, modulesInUse - 1);
+    uint32_t currentModuleTime = elapsedTime - moduleTime * currentModuleIdx;
+    uint8_t startLed = sectionLength * currentModuleIdx + COLOR_BREAK_LENGTH;
+
+    uint8_t brightness = 0;
+    CHSV moduleColor = droneColors[moduleToColorMap[currentModuleIdx]];
+
+    switch(phase) {
+        case START_PHASE:
+            fill_solid(leds, NUM_LEDS, CRGB::Black);
+            break;
+        case WORK_CYCLE_PHASE:
+            if (currentModuleTime < fadeInTime) {
+                brightness = map(currentModuleTime, 0, fadeInTime, 0, 255);
+            } else {
+                brightness = 255;
+            }
+
+            moduleColor.v = brightness;
+
+            // ------ set COLOR_BREAK_LENGTH leds to black
+            // for(uint8_t j = 0; j < COLOR_BREAK_LENGTH; j++) {
+            //     uint8_t startLed = sectionLength * currentModuleIdx;
+            //     CRGB black = CRGB(0,0,0);
+            //     leds[startLed + j] = black;
+            // }
+
+            for(uint8_t j = startLed; j < startLed + colorLedsCount; j++) {
+                leds[j] = moduleColor;
+            }
+            break;
+        case END_PHASE:
+            setNewEffect(EFFECT_ETERNAL_FIRE, 0);
+            break;
+    }
+}
+
+void showThresholdSetupEffect(uint8_t phase, uint32_t elapsedTime) {
+    #define COLOR_BREAK_LENGTH 4 // number of leds to remain black between colored areas
+    #define SLOW_PULSE_DURATION 1500
+    #define SLOW_PULSE_CHANGE_TIME SLOW_PULSE_DURATION * 0.4
+    #define FAST_PULSE_DURATION 1000
+    #define FAST_PULSE_CHANGE_TIME FAST_PULSE_DURATION * 0.5
+    #define MIN_SLOW_BRIGHTNESS 5
+    #define MAX_SLOW_BRIGHTNESS 150
+    #define MIN_FAST_BRIGHTNESS 50
+    #define MAX_FAST_BRIGHTNESS 250
+    #define SOLID_BRIGHTNESS 255
+
+    uint8_t sectionLength = NUM_LEDS / modulesInUse;
+    uint8_t colorLedsCount = sectionLength - COLOR_BREAK_LENGTH;
+
+    // uint32_t moduleTime = (effectDuration / modulesInUse) / 2; // show in sequence for half-time, then just let shine for another half
+    // uint32_t fadeInTime = moduleTime / 2;
+    // uint8_t currentModuleIdx = constrain(elapsedTime / moduleTime, 0, modulesInUse - 1);
+    // uint32_t currentModuleTime = elapsedTime - moduleTime * currentModuleIdx;
+
+    uint32_t slowPulseTime = elapsedTime % SLOW_PULSE_DURATION;
+    uint8_t slowBrightness = MAX_SLOW_BRIGHTNESS;
+    uint8_t slowDimmedLeds = 0;
+    if (slowPulseTime < SLOW_PULSE_CHANGE_TIME) {
+        slowBrightness = map(slowPulseTime, 0, SLOW_PULSE_CHANGE_TIME, MIN_SLOW_BRIGHTNESS, MAX_SLOW_BRIGHTNESS);
+        slowDimmedLeds = map(slowPulseTime, 0, SLOW_PULSE_CHANGE_TIME, 0, 20);
+    } else if (slowPulseTime > (SLOW_PULSE_DURATION - SLOW_PULSE_CHANGE_TIME)) {
+        slowBrightness = map(slowPulseTime, SLOW_PULSE_DURATION - SLOW_PULSE_CHANGE_TIME, SLOW_PULSE_DURATION, MAX_SLOW_BRIGHTNESS, MIN_SLOW_BRIGHTNESS);
+        slowBrightness = map(slowPulseTime, SLOW_PULSE_DURATION - SLOW_PULSE_CHANGE_TIME, SLOW_PULSE_DURATION, 20, 0);
+    }
+
+    uint32_t fastPulseTime = elapsedTime % FAST_PULSE_DURATION;
+    uint8_t fastBrightness = MAX_FAST_BRIGHTNESS;
+    uint8_t fastDimmedLeds = 0;
+    if (fastPulseTime < FAST_PULSE_CHANGE_TIME) {
+        fastBrightness = map(fastPulseTime, 0, FAST_PULSE_CHANGE_TIME, MIN_FAST_BRIGHTNESS, MAX_FAST_BRIGHTNESS);
+        fastDimmedLeds = map(fastPulseTime, 0, FAST_PULSE_CHANGE_TIME, 0, colorLedsCount * 2 / 5);
+    } else if (fastPulseTime > (FAST_PULSE_DURATION - FAST_PULSE_CHANGE_TIME)) {
+        fastBrightness = map(fastPulseTime, FAST_PULSE_DURATION - FAST_PULSE_CHANGE_TIME, FAST_PULSE_DURATION, MAX_FAST_BRIGHTNESS, MIN_FAST_BRIGHTNESS);
+        fastDimmedLeds = map(fastPulseTime, FAST_PULSE_DURATION - FAST_PULSE_CHANGE_TIME, FAST_PULSE_DURATION, colorLedsCount * 2 / 5, 0);
+    }
+
+    switch(phase) {
+        case START_PHASE:
+            fill_solid(leds, NUM_LEDS, CRGB::Black);
+            break;
+        case WORK_CYCLE_PHASE:
+            for(uint8_t i = 0; i < modulesInUse; i++) {
+                // show state of a module
+                uint8_t startLed = sectionLength * i;
+                uint8_t setupPhase = thresholdSetupPhases[i];
+                CHSV moduleColor = droneColors[moduleToColorMap[i]];
+                switch(setupPhase) {
+                    case 0:
+                        moduleColor.v = SOLID_BRIGHTNESS;
+                        for(uint8_t j = startLed; j < startLed + colorLedsCount; j++) {
+                            leds[j] = moduleColor;
+                        }
+                        break;
+                    case 1:
+                        moduleColor.v = random8(MIN_SLOW_BRIGHTNESS, MAX_SLOW_BRIGHTNESS);
+                        for(uint8_t j = startLed; j < startLed + colorLedsCount; j++) {
+                            leds[j] = moduleColor;
+                        }
+                        for(uint8_t k = 0; k < 5; k++) {
+                            uint8_t startPos = startLed + random8(0, sectionLength - 6);
+                            for(uint8_t m = 0; m < 6; m++) {
+                                leds[startPos + m] = CRGB::Black;
+                            }
+                        }
+                        break;
+                    case 2:
+                        for(uint8_t j = startLed; j < startLed + colorLedsCount; j++) {
+                            if (j-startLed > fastDimmedLeds && j < startLed + colorLedsCount - fastDimmedLeds) {
+                                moduleColor.v = MAX_FAST_BRIGHTNESS;
+                            } else {
+                                moduleColor.v = 0;
+                            }
+                            leds[j] = moduleColor;
+                        }
+                        break;
+                    default:
+                        moduleColor.v = 0;
+                        for(uint8_t j = startLed; j < startLed + colorLedsCount; j++) {
+                            leds[j] = moduleColor;
+                        }
+                }
+            }
+            break;
+        case END_PHASE:
+            // setNewEffect(EFFECT_ETERNAL_FIRE, 0);
             break;
     }
 }

@@ -44,13 +44,17 @@ SOFTWARE.
 
 // input control byte constants
 #define CONTROL_COMMAND_RACE      'R'
-#define CONTROL_VALUE_END_RACE      '0'
+#define CONTROL_THRESHOLD_SETUP   'H'
+
+#define CONTROL_VALUE_END_RACE    '0'
+#define CONTROL_VALUE_START_THRESHOLD_SETUP '1'
 
 #define CONTROL_START_COUNTER_PREPARE '1'
 #define CONTROL_START_COUNTER_GO '2'
 
 // output id byte constants
 #define RESPONSE_LAPTIME        'L'
+#define RESPONSE_THRESHOLD_SETUP     'H'
 
 #define CMD_PREPARE     0x11
 #define CMD_COUNTDOWN_3 0x12
@@ -58,11 +62,13 @@ SOFTWARE.
 #define CMD_COUNTDOWN_1 0x14
 #define CMD_START_RACE  0x15
 #define CMD_END_RACE    0x16
+#define CMD_SHOW_COLORS 0x17
+#define CMD_THRESHOLD_SETUP_START 0x1F
 
-#define CMD_LAP_DRONE_HI 0x20
-
-#define CMD_SET_COLOR_INDEX_HI 0x30
-
+#define CMD_LAP_DRONE_HI 0x20 // up to 0x2F
+#define CMD_SET_COLOR_INDEX_HI 0x30 // up to 0xAF (8 colors) is range for set color commands
+#define CMD_SETUP_THRESHOLD_STATUS_HI 0xB0 // up to 0xDF (3 statuses) is range for setup threshold commands
+#define CMD_SET_MODULES_COUNT_HI 0xE0 // up to 0xEF
 
 //----- other globals------------------------------
 uint8_t isRaceStarted = 0;
@@ -121,15 +127,29 @@ void handleSerialRequest(uint8_t *controlData, uint8_t length) {
     uint8_t controlByteCommand = controlData[1];
     uint8_t controlByteValue = controlData[2];
 
-    if(controlByteCommand == CONTROL_COMMAND_RACE) {
-        if (controlByteValue == CONTROL_VALUE_END_RACE) {
-            isRaceStarted = 0;
-            sendCommand(CMD_END_RACE) ; // end race and switch back to default effect
-        }
-        else {
-            isRaceStarted = 1;
-            sendCommand(CMD_START_RACE) ; // start race
-        }
+    switch(controlByteCommand) {
+        case CONTROL_COMMAND_RACE:
+            if (length > 3) { // set value command
+                if (controlByteValue == CONTROL_VALUE_END_RACE) {
+                    isRaceStarted = 0;
+                    sendCommand(CMD_END_RACE) ; // end race and switch back to default effect
+                }
+                else {
+                    isRaceStarted = 1;
+                    sendCommand(CMD_START_RACE) ; // start race
+                }
+            }
+            break;
+
+        // no sense to catch R*H1 because race control software might not send this command at all, instead sending calibration commands to individual modules
+
+        // case CONTROL_THRESHOLD_SETUP:
+        //     if (length > 3) { // set value command
+        //         if (controlByteValue == CONTROL_VALUE_START_THRESHOLD_SETUP) {
+        //             sendCommand(CMD_THRESHOLD_SETUP_START);
+        //         }
+        //     }
+        //     break;
     }
 }
 
@@ -145,6 +165,18 @@ void handleDedicatedSerialRequest(uint8_t *controlData, uint8_t length) {
         uint8_t colorIndex = TO_BYTE(controlData[2]);
         uint8_t command = CMD_SET_COLOR_INDEX_HI + (colorIndex << 4);
         command |= moduleIndex + 1; // add 1 to index to avoid using zeros in commands (because starting zero is used to identify start of transmission)
+        sendCommand(command);
+        return;
+    }
+
+    if (controlData[0] == 'S') {
+        sendCommand(CMD_SHOW_COLORS);
+        return;
+    }
+
+    if (controlData[0] == 'N') {
+        uint8_t modulesCount = TO_BYTE(controlData[1]);
+        uint8_t command = CMD_SET_MODULES_COUNT_HI | modulesCount;
         sendCommand(command);
         return;
     }
@@ -173,6 +205,12 @@ void handleSerialResponse(uint8_t *responseData, uint8_t length) {
     switch (responseCode) {
         case RESPONSE_LAPTIME:
             sendCommand(CMD_LAP_DRONE_HI | (deviceId + 1)) ; // lap register command with device id
+            break;
+        case RESPONSE_THRESHOLD_SETUP:
+            uint8_t thresholdSetupState = TO_BYTE(responseData[2]);
+            uint8_t command = CMD_SETUP_THRESHOLD_STATUS_HI + (thresholdSetupState << 4); // 3 statuses possible
+            command |= deviceId + 1; // add 1 to index to avoid using zeros in commands (because starting zero is used to identify start of transmission)
+            sendCommand(command);
             break;
     }
 };
