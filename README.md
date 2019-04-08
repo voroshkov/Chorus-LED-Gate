@@ -2,7 +2,7 @@
 
 This is an add-in hardware for the Chorus Laptimer device.
 
-It allows you to light up the moment when a racing drone passes the finish gate. Each VTX channel has its own color, so spectators can easily see which pilot makes the lap, like this:
+It allows you to light up the moment when a racing drone passes the finish gate. Each VTX channel has its own color, so spectators can easily see which pilot makes the lap, like this (click to watch video):
 
 [![Chorus LED Gate Video](https://img.youtube.com/vi/h5rXzPiw1T4/0.jpg)](https://youtu.be/h5rXzPiw1T4)
 
