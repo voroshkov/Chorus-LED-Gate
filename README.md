@@ -1,3 +1,30 @@
+# Led Gate Module for Chorus Laptimer
+
+This is an add-in hardware for the Chorus Laptimer device.
+
+It allows you to light up the moment when a racing drone passes the finish gate. Each VTX channel has its own color, so spectators can easily see which pilot makes the lap, like this:
+
+[![Chorus LED Gate Video](https://img.youtube.com/vi/h5rXzPiw1T4/0.jpg)](https://youtu.be/h5rXzPiw1T4)
+
+## How it works
+
+The module listens to the UART data traffic from Chorus nodes and therefore "knows" when a heat is started/finished and when any node detects a new lap. So whenever a new lap is detected in the race mode, the LEDs are lit with a color corresponding to the number of the Chorus node which reported the lap.
+
+The module introduces its own extension for Chorus API (commands starting with "T").
+
+## Attachment to Chorus
+
+The module doesn't issue commands, just listens to them. This makes it possible to connect it in parallel with Chorus UART Tx line.
+Schematically it should look like this:
+
+```
+Chorus nodes:N1 -> N2 -> ... Nn +-->  Bluetooth/WiFi Dongle
+                                | 
+                                | (2 wires: Gnd & Tx)
+                                |
+                                +--> LED Gate module -> LED strips
+```
+
 # Flashing:
 
 Flash first arduino with `chorus_led_module.ino`
