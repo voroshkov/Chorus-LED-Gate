@@ -72,7 +72,9 @@ SOFTWARE.
 #define CMD_START_RACE  0x15
 #define CMD_END_RACE    0x16
 #define CMD_SHOW_COLORS 0x17
-#define CMD_THRESHOLD_SETUP_START 0x1F
+#define CMD_THRESHOLD_SETUP_START 0x1E
+#define CMD_THRESHOLD_SETUP_STOP 0x1F
+
 
 #define CMD_LAP_DRONE_1 0x21
 #define CMD_LAP_DRONE_8 0x28
@@ -267,6 +269,12 @@ void loop() {
         } else if (eventId == CMD_THRESHOLD_SETUP_START) { // start setting up threshold
             clearThresholdSetupPhases();
             setNewEffect(EFFECT_SHOW_THRESHOLD_SETUP, 0);
+
+        } else if (eventId == CMD_THRESHOLD_SETUP_STOP) { // stop setting up threshold
+            clearThresholdSetupPhases();
+            fireNumLeds = LOW_FIRE_LEDS;
+            setNewEffect(EFFECT_ETERNAL_FIRE, 0);
+            effectPaletteIndex = MAX_COLORS_COUNT;
 
         } else if ((eventId >= CMD_SET_COLOR_INDEX_HI) && (eventId <= CMD_SET_COLOR_INDEX_HI + (MAX_COLORS_COUNT << 4))) {
             setColorForModule((eventId - CMD_SET_COLOR_INDEX_HI) >> 4 , (eventId & 0xF) - 1); // decrease module idx by 1 to use zero-based indexes

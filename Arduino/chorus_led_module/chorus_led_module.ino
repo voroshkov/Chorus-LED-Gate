@@ -48,6 +48,7 @@ SOFTWARE.
 
 #define CONTROL_VALUE_END_RACE    '0'
 #define CONTROL_VALUE_START_THRESHOLD_SETUP '1'
+#define CONTROL_VALUE_STOP_THRESHOLD_SETUP '0'
 
 #define CONTROL_START_COUNTER_PREPARE '1'
 #define CONTROL_START_COUNTER_GO '2'
@@ -63,7 +64,8 @@ SOFTWARE.
 #define CMD_START_RACE  0x15
 #define CMD_END_RACE    0x16
 #define CMD_SHOW_COLORS 0x17
-#define CMD_THRESHOLD_SETUP_START 0x1F
+#define CMD_THRESHOLD_SETUP_START 0x1E
+#define CMD_THRESHOLD_SETUP_STOP 0x1F
 
 #define CMD_LAP_DRONE_HI 0x20 // up to 0x2F
 #define CMD_SET_COLOR_INDEX_HI 0x30 // up to 0xAF (8 colors) is range for set color commands
@@ -150,6 +152,14 @@ void handleSerialRequest(uint8_t *controlData, uint8_t length) {
         //         }
         //     }
         //     break;
+
+        case CONTROL_THRESHOLD_SETUP:
+            if (length > 3) { // set value command
+                if (controlByteValue == CONTROL_VALUE_STOP_THRESHOLD_SETUP) {
+                    sendCommand(CMD_THRESHOLD_SETUP_STOP);
+                }
+            }
+            break;
     }
 }
 
