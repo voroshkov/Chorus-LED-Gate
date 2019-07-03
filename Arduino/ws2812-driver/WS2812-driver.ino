@@ -75,13 +75,15 @@ SOFTWARE.
 #define CMD_THRESHOLD_SETUP_START 0x1E
 #define CMD_THRESHOLD_SETUP_STOP 0x1F
 
-
 #define CMD_LAP_DRONE_1 0x21
 #define CMD_LAP_DRONE_8 0x28
 
 #define CMD_SET_COLOR_INDEX_HI 0x30
 #define CMD_SETUP_THRESHOLD_STATUS_HI 0xB0 // 0x30 + 0x80 (because 8 colors might be used for color commands)
 #define CMD_SET_MODULES_COUNT_HI 0xE0
+
+#define EEPROM_MODULES_COUNT_OFFSET   10
+#define EEPROM_COLORS_OFFSET          11
 
 CRGB leds[NUM_LEDS];
 
@@ -210,6 +212,8 @@ void setup() {
     random16_add_entropy(28);   // for module 1
     // random16_add_entropy(173);   // for module 2
 
+    readModulesCountFromEEPROM();
+
     readModuleColorsFromEEPROM();
 
     attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(INTERRUPT_PIN), intHandler, CHANGE);
@@ -263,7 +267,7 @@ void loop() {
             setNewEffect(EFFECT_SHOW_COLORS, modulesInUse * 700);
 
         } else if (eventId >= CMD_SET_MODULES_COUNT_HI && eventId <= CMD_SET_MODULES_COUNT_HI + MAX_MODULES_COUNT) { // set used number of modules
-            modulesInUse = eventId - CMD_SET_MODULES_COUNT_HI;
+            setModulesCount(eventId - CMD_SET_MODULES_COUNT_HI);
             setNewEffect(EFFECT_SHOW_COLORS, modulesInUse * 700);
 
         } else if (eventId == CMD_THRESHOLD_SETUP_START) { // start setting up threshold
@@ -344,7 +348,7 @@ void clearThresholdSetupPhases() {
 
 void readModuleColorsFromEEPROM() {
     for(uint8_t i = 0; i < MAX_MODULES_COUNT; i++) {
-        uint8_t value = EEPROM.read(i);
+        uint8_t value = EEPROM.read(i + EEPROM_COLORS_OFFSET);
         if (value > MAX_COLORS_COUNT) {
             value = 0;
         }
@@ -352,11 +356,27 @@ void readModuleColorsFromEEPROM() {
     }
 }
 
+
 void setColorForModule(uint8_t colorIdx, uint8_t moduleIdx) {
     if (colorIdx < MAX_COLORS_COUNT && moduleIdx < MAX_MODULES_COUNT) {
-        EEPROM.update(moduleIdx, colorIdx);
+        EEPROM.update(moduleIdx + EEPROM_COLORS_OFFSET, colorIdx);
         moduleToColorMap[moduleIdx] = colorIdx;
     }
+}
+
+void readModulesCountFromEEPROM() {
+    modulesInUse = EEPROM.read(EEPROM_MODULES_COUNT_OFFSET);
+    if (modulesInUse == 0) {
+        modulesInUse = 1;
+    }
+}
+
+void setModulesCount(uint8_t count) {
+    modulesInUse = count;
+    if (modulesInUse == 0) {
+        modulesInUse = 1;
+    }
+    EEPROM.update(EEPROM_MODULES_COUNT_OFFSET, count);
 }
 
 void runCurrentEffect() {
