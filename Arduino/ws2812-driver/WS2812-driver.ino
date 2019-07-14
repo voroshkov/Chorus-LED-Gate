@@ -85,6 +85,8 @@ SOFTWARE.
 #define EEPROM_MODULES_COUNT_OFFSET   10
 #define EEPROM_COLORS_OFFSET          11
 
+#define DEFAULT_MODULES_COUNT 4
+
 CRGB leds[NUM_LEDS];
 
 CHSV countdownCHSVColors[NUM_COUNDOWN_COLORS] = {
@@ -190,7 +192,7 @@ CHSV droneColors[MAX_COLORS_COUNT] = {
 
 uint8_t moduleToColorMap[MAX_MODULES_COUNT]; // read from EEPROM on setup, set via commands
 
-uint8_t modulesInUse = 4; // number of modules in use; needed for calibration and colors demo
+uint8_t modulesInUse = DEFAULT_MODULES_COUNT; // number of modules in use; needed for calibration and colors demo
 
 uint8_t thresholdSetupPhases[MAX_MODULES_COUNT];
 
@@ -365,16 +367,14 @@ void setColorForModule(uint8_t colorIdx, uint8_t moduleIdx) {
 }
 
 void readModulesCountFromEEPROM() {
-    modulesInUse = EEPROM.read(EEPROM_MODULES_COUNT_OFFSET);
-    if (modulesInUse == 0) {
-        modulesInUse = 1;
-    }
+    uint8_t count = EEPROM.read(EEPROM_MODULES_COUNT_OFFSET);
+    setModulesCount(count); // this will update EEPROM to default value if the reading is invalid
 }
 
 void setModulesCount(uint8_t count) {
     modulesInUse = count;
     if (modulesInUse == 0) {
-        modulesInUse = 1;
+        modulesInUse = DEFAULT_MODULES_COUNT;
     }
     EEPROM.update(EEPROM_MODULES_COUNT_OFFSET, count);
 }
