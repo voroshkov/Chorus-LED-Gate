@@ -82,6 +82,9 @@ SOFTWARE.
 #define CMD_SETUP_THRESHOLD_STATUS_HI 0xB0 // 0x30 + 0x80 (because 8 colors might be used for color commands)
 #define CMD_SET_MODULES_COUNT_HI 0xE0
 
+#define EEPROM_INITIALIZED_MARK   'V' // V is for Voroshkov :)
+
+#define EEPROM_IS_INITIALIZED_FLAG_OFFSET   9
 #define EEPROM_MODULES_COUNT_OFFSET   10
 #define EEPROM_COLORS_OFFSET          11
 
@@ -214,9 +217,21 @@ void setup() {
     random16_add_entropy(28);   // for module 1
     // random16_add_entropy(173);   // for module 2
 
-    readModulesCountFromEEPROM();
+    uint8_t isFirstRun = checkIsFirstRunInEEPROM();
 
-    readModuleColorsFromEEPROM();
+    // initialize EEPROM on first run: max modules and all possible colors
+    if (isFirstRun) {
+        // Set all initial data in EEPROM and mark EEPROM as "initialized" to avoid re-initializing
+        // on subsequent runs and prevent overwriting the user-configured values (set via API)
+        setModulesCount(MAX_MODULES_COUNT);
+        for(uint8_t i = 0; i < MAX_MODULES_COUNT; i++) {
+            setColorForModule(i, i);
+        }
+        setIsAlreadyInitializedFlagInEEPROM();
+    } else {
+        readModulesCountFromEEPROM();
+        readModuleColorsFromEEPROM();
+    }
 
     attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(INTERRUPT_PIN), intHandler, CHANGE);
     // attachPinChangeInterrupt(digitalPinToPinChangeInterrupt(INTERRUPT_BTN1), btnHandler1, FALLING);
@@ -346,6 +361,15 @@ void clearThresholdSetupPhases() {
             thresholdSetupPhases[i] = 255; // some non-existing value
         }
     }
+}
+
+uint8_t checkIsFirstRunInEEPROM() {
+    uint8_t value = EEPROM.read(EEPROM_IS_INITIALIZED_FLAG_OFFSET);
+    return value != EEPROM_INITIALIZED_MARK; // return false if EEPROM_INITIALIZED_MARK is set
+}
+
+void setIsAlreadyInitializedFlagInEEPROM() {
+    EEPROM.update(EEPROM_IS_INITIALIZED_FLAG_OFFSET, EEPROM_INITIALIZED_MARK);
 }
 
 void readModuleColorsFromEEPROM() {
